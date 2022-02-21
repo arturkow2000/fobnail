@@ -16,7 +16,7 @@ impl fmt::Display for Key<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rsa { n, .. } => {
-                write!(f, "RSA{}", n.len())
+                write!(f, "RSA{}", n.len() * 8)
             }
         }
     }

@@ -5,12 +5,14 @@ pub type Result<T> = ::core::result::Result<T, Error>;
 // TODO: consider using thiserror when support for no_std lands
 // https://github.com/dtolnay/thiserror/pull/64
 
+#[derive(Debug)]
 pub enum Error {
     X509(x509::der::Error),
     X509Spki(x509::spki::Error),
     CustomStatic(&'static str),
     ExceededRecursionLimit,
     IssuerNotFound,
+    UntrustedSelfSignedCert,
 }
 
 impl From<x509::der::Error> for Error {
@@ -33,6 +35,7 @@ impl Display for Error {
             Self::CustomStatic(e) => e.fmt(f),
             Self::ExceededRecursionLimit => write!(f, "exceeded recursion limit"),
             Self::IssuerNotFound => write!(f, "no issuer certicate found"),
+            Self::UntrustedSelfSignedCert => write!(f, "untrusted self-signed certificate"),
         }
     }
 }

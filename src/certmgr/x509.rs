@@ -5,7 +5,8 @@ use alloc::vec::Vec;
 use der::Decodable;
 use x509::{
     der::{asn1::UIntBytes, Length, Sequence, Tag, Tagged},
-    ObjectIdentifier, PKIX_AT_COUNTRYNAME, PKIX_AT_ORGANIZATIONNAME, PKIX_AT_STATEORPROVINCENAME,
+    AuthorityKeyIdentifier, ObjectIdentifier, SubjectKeyIdentifier, PKIX_AT_COUNTRYNAME,
+    PKIX_AT_ORGANIZATIONNAME, PKIX_AT_STATEORPROVINCENAME,
 };
 
 /// Structure representing either or issuer or subject.
@@ -27,6 +28,13 @@ impl fmt::Display for IssuerSubject<'_> {
 }
 
 pub struct X509Certificate<'a> {
+    // These fields are kept because we need to extract raw TBS certificate to
+    // verify signature. Keeping reference theoretically could result in
+    // undefined behaviour when dropping X509Certificate - in drop() we destroy
+    // `owned` field which causes reference to become invalid, Rust forbids
+    // invalid references, having one (even if it's not used) is considered UB.
+    raw_certificate: *const u8,
+    raw_certificate_len: usize,
     inner: ManuallyDrop<x509::Certificate<'a>>,
     // Must be put after inner, so it's dropped later
     // Dropping this before inner will result in UB
@@ -38,9 +46,8 @@ pub struct X509Certificate<'a> {
 
 impl<'a> X509Certificate<'a> {
     pub fn parse_owned(data: Vec<u8>) -> Result<Self> {
-        let mut decoder = x509::der::Decoder::new(unsafe {
-            ::core::slice::from_raw_parts(data.as_ptr(), data.len())
-        })?;
+        let slice = unsafe { ::core::slice::from_raw_parts(data.as_ptr(), data.len()) };
+        let mut decoder = x509::der::Decoder::new(slice)?;
         let cert = decoder.decode::<x509::Certificate>()?;
 
         Ok(Self {
@@ -49,6 +56,8 @@ impl<'a> X509Certificate<'a> {
             // Certificates loaded from memory are never trusted. Only
             // certificate loaded from persistent storage may be trusted.
             is_trusted: false,
+            raw_certificate: slice.as_ptr(),
+            raw_certificate_len: slice.len(),
         })
     }
 
@@ -62,6 +71,8 @@ impl<'a> X509Certificate<'a> {
             // Certificates loaded from memory are never trusted. Only
             // certificate loaded from persistent storage may be trusted.
             is_trusted: false,
+            raw_certificate: data.as_ptr(),
+            raw_certificate_len: data.len(),
         })
     }
 
@@ -107,9 +118,6 @@ impl<'a> X509Certificate<'a> {
                 exponent_bytes[..l].copy_from_slice(b);
                 let exponent = u32::from_le_bytes(exponent_bytes);
 
-                info!("n: {:#?}", x.n);
-                info!("e: {}", exponent);
-
                 Ok(Key::Rsa {
                     n: x.n.as_bytes(),
                     e: exponent,
@@ -129,17 +137,85 @@ impl<'a> X509Certificate<'a> {
         const OID_SHA512_WITH_RSA: ObjectIdentifier =
             ObjectIdentifier::new("1.2.840.113549.1.1.13");
 
+        let get_rsa_signature = || -> Result<&[u8]> {
+            self.inner
+                .signature
+                .as_bytes()
+                .ok_or(Error::CustomStatic("Invalid signature length"))
+        };
+
         match self.inner.signature_algorithm.oid {
-            OID_SHA224_WITH_RSA => Ok(Signature::rsa(HashAlgorithm::Sha224)),
-            OID_SHA256_WITH_RSA => Ok(Signature::rsa(HashAlgorithm::Sha256)),
-            OID_SHA384_WITH_RSA => Ok(Signature::rsa(HashAlgorithm::Sha384)),
-            OID_SHA512_WITH_RSA => Ok(Signature::rsa(HashAlgorithm::Sha512)),
+            OID_SHA224_WITH_RSA => {
+                // RSA signature size always matches
+                Ok(Signature::rsa(HashAlgorithm::Sha224, get_rsa_signature()?))
+            }
+            OID_SHA256_WITH_RSA => Ok(Signature::rsa(HashAlgorithm::Sha256, get_rsa_signature()?)),
+            OID_SHA384_WITH_RSA => Ok(Signature::rsa(HashAlgorithm::Sha384, get_rsa_signature()?)),
+            OID_SHA512_WITH_RSA => Ok(Signature::rsa(HashAlgorithm::Sha512, get_rsa_signature()?)),
             _ => Err(Error::CustomStatic("Unsupported signature type")),
         }
     }
 
     pub fn is_trusted(&self) -> bool {
         self.is_trusted
+    }
+
+    /// Workaround for getting TBS certificate as raw byte array. Needed for
+    /// certificate chain verification.
+    pub fn tbs_certificate_raw(&self) -> Result<&[u8]> {
+        // SAFETY: self.raw_certificate refers to data that is valid until we
+        // call drop()
+        let data =
+            unsafe { core::slice::from_raw_parts(self.raw_certificate, self.raw_certificate_len) };
+
+        ///Structure supporting deferred decoding of fields in the Certificate SEQUENCE
+        pub struct DeferDecodeCertificate<'a> {
+            pub tbs_certificate: &'a [u8],
+            pub signature_algorithm: &'a [u8],
+            pub signature: &'a [u8],
+        }
+
+        impl<'a> Decodable<'a> for DeferDecodeCertificate<'a> {
+            fn decode(decoder: &mut der::Decoder<'a>) -> der::Result<DeferDecodeCertificate<'a>> {
+                decoder.sequence(|decoder| {
+                    let tbs_certificate = decoder.tlv_bytes()?;
+                    let signature_algorithm = decoder.tlv_bytes()?;
+                    let signature = decoder.tlv_bytes()?;
+                    Ok(Self {
+                        tbs_certificate,
+                        signature_algorithm,
+                        signature,
+                    })
+                })
+            }
+        }
+
+        let mut decoder = x509::der::Decoder::new(data)?;
+        let raw = decoder.decode::<DeferDecodeCertificate>()?;
+
+        Ok(raw.tbs_certificate)
+    }
+
+    /// Obtain X.509v3 Authority Key Identifier
+    pub fn authority_key_id(&self) -> Option<&[u8]> {
+        let extensions = self.inner.tbs_certificate.extensions.as_ref()?;
+        let key_id = extensions
+            .iter()
+            .find(|ext| ext.extn_id == ObjectIdentifier::new("2.5.29.35"))?;
+
+        let key_id = AuthorityKeyIdentifier::from_der(key_id.extn_value).ok()?;
+        Some(key_id.key_identifier?.as_bytes())
+    }
+
+    /// Obtain X.509v3 Subject Key Identifier
+    pub fn subject_key_id(&self) -> Option<&[u8]> {
+        let extensions = self.inner.tbs_certificate.extensions.as_ref()?;
+        let key_id = extensions
+            .iter()
+            .find(|ext| ext.extn_id == ObjectIdentifier::new("2.5.29.14"))?;
+
+        let key_id = SubjectKeyIdentifier::from_der(key_id.extn_value).ok()?;
+        Some(key_id.as_bytes())
     }
 }
 
