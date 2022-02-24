@@ -23,6 +23,8 @@ rsa = { version = "0.5", default-features = false, features = ["alloc"] }
 x509 = { path = "external/formats/x509" }
 x501 = { path = "external/formats/x501" }
 der = { path = "external/formats/der" }
+# TODO: remove this dependency after RSA gets moved to Trussed.
+rand_core = "0.6"
 
 [profile.dev]
 lto = "thin"

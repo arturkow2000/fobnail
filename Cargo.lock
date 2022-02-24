@@ -602,6 +602,7 @@ dependencies = [
  "log",
  "pal_nrf",
  "pal_pc",
+ "rand_core",
  "rsa",
  "serde",
  "smoltcp",
