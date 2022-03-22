@@ -1,7 +1,7 @@
 use alloc::{rc::Rc, vec::Vec};
 use core::fmt;
 
-use super::crypto::Key;
+use super::{crypto::Key, signing::Nonce};
 use crate::certmgr::X509Certificate;
 use pal::timer::get_time_ms;
 
@@ -48,6 +48,7 @@ pub enum State<'a> {
     /// Send metadata request and wait for response.
     RequestMetadata {
         aik_pubkey: Rc<Key<'a>>,
+        nonce: Nonce,
         request_pending: bool,
     },
 
@@ -56,6 +57,23 @@ pub enum State<'a> {
     VerifyMetadata {
         aik_pubkey: Rc<Key<'a>>,
         metadata: Vec<u8>,
+        nonce: Nonce,
+    },
+
+    RequestEvidence {
+        aik_pubkey: Rc<Key<'a>>,
+        /// RIM from Fobnail's internal storage. Evidence will be verified
+        /// against this.
+        rim: Vec<u8>,
+        request_pending: bool,
+        nonce: Nonce,
+    },
+
+    VerifyEvidence {
+        aik_pubkey: Rc<Key<'a>>,
+        rim: Vec<u8>,
+        evidence: Vec<u8>,
+        nonce: Nonce,
     },
 
     /// Idle state with optional timeout. After timeout resets into Init state.
@@ -90,6 +108,8 @@ impl fmt::Display for State<'_> {
             Self::LoadAik { .. } => write!(f, "load AIK"),
             Self::RequestMetadata { .. } => write!(f, "request metadata"),
             Self::VerifyMetadata { .. } => write!(f, "verify metadata"),
+            Self::RequestEvidence { .. } => write!(f, "request evidence"),
+            Self::VerifyEvidence { .. } => write!(f, "verify evidence"),
             Self::Idle { .. } => write!(f, "idle"),
         }
     }

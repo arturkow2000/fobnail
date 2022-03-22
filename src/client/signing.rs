@@ -8,11 +8,14 @@ use trussed::{
     types::{Mechanism, SignatureSerialization},
 };
 
+pub const NONCE_SIZE: usize = 32;
+
 /// Verifies signature and decodes a CBOR-encoded object if signature is valid.
 pub fn decode_signed_object<'a: 'de, 'de, S, T>(
     trussed: &mut S,
     data: &'a [u8],
     signing_key: &crypto::Key,
+    nonce: &[u8],
 ) -> Result<(T, &'a [u8], trussed::types::ShortData), ()>
 where
     S: trussed::client::CryptoClient,
@@ -69,13 +72,13 @@ where
             }
         }
         crypto::Key::Rsa(key) => {
-            let sha = trussed::try_syscall!(trussed.hash(
-                Mechanism::Sha256,
-                trussed::Bytes::from_slice(signed_object.data).unwrap(),
-            ))
-            .map_err(|e| {
-                error!("Failed to compute SHA-256: {:?}", e);
-            })?;
+            let mut data_to_hash = trussed::Bytes::from_slice(signed_object.data).unwrap();
+            data_to_hash.extend_from_slice(nonce).unwrap();
+
+            let sha = trussed::try_syscall!(trussed.hash(Mechanism::Sha256, data_to_hash,))
+                .map_err(|e| {
+                    error!("Failed to compute SHA-256: {:?}", e);
+                })?;
             // Currently, Trussed does not provide RSA support so we use
             // rsa crate directly.
             match key.inner.verify(
@@ -103,4 +106,14 @@ where
             }
         }
     }
+}
+
+pub type Nonce = [u8; NONCE_SIZE];
+
+pub fn generate_nonce<T>(trussed: &mut T) -> Nonce
+where
+    T: trussed::client::CryptoClient,
+{
+    let r = trussed::syscall!(trussed.random_bytes(NONCE_SIZE));
+    r.bytes.as_slice().try_into().unwrap()
 }

@@ -233,7 +233,10 @@ impl<'a> FobnailClient<'a> {
                 let mut trussed = self.trussed.borrow_mut();
 
                 match signing::decode_signed_object::<_, proto::Metadata>(
-                    *trussed, metadata, aik_pubkey,
+                    *trussed,
+                    metadata,
+                    aik_pubkey,
+                    &[],
                 )
                 .map(|(meta, _, hash)| (meta, hash))
                 {
@@ -544,7 +547,7 @@ impl<'a> FobnailClient<'a> {
         T: trussed::client::CryptoClient,
     {
         let (rim, raw_rim, _) =
-            signing::decode_signed_object::<_, proto::Rim>(trussed, rim_with_sig, aik)?;
+            signing::decode_signed_object::<_, proto::Rim>(trussed, rim_with_sig, aik, &[])?;
 
         Self::do_verify_pcrs(&rim.sha1, 20)?;
         Self::do_verify_pcrs(&rim.sha256, 32)?;
