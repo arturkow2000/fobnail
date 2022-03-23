@@ -16,7 +16,7 @@ pub fn decode_signed_object<'a: 'de, 'de, S, T>(
     data: &'a [u8],
     signing_key: &crypto::Key,
     nonce: &[u8],
-) -> Result<(T, &'a [u8], trussed::types::ShortData), ()>
+) -> Result<(T, &'a [u8]), ()>
 where
     S: trussed::client::CryptoClient,
     T: Deserialize<'de> + 'a,
@@ -59,7 +59,7 @@ where
                                 e
                             )
                         })?;
-                    Ok((inner_object, signed_object.data, sha.hash))
+                    Ok((inner_object, signed_object.data))
                 }
                 Ok(_) => {
                     error!("Signature is invalid");
@@ -75,7 +75,7 @@ where
             let mut data_to_hash = trussed::Bytes::from_slice(signed_object.data).unwrap();
             data_to_hash.extend_from_slice(nonce).unwrap();
 
-            let sha = trussed::try_syscall!(trussed.hash(Mechanism::Sha256, data_to_hash,))
+            let sha = trussed::try_syscall!(trussed.hash(Mechanism::Sha256, data_to_hash))
                 .map_err(|e| {
                     error!("Failed to compute SHA-256: {:?}", e);
                 })?;
@@ -97,7 +97,7 @@ where
                                 e
                             )
                         })?;
-                    Ok((inner_object, signed_object.data, sha.hash))
+                    Ok((inner_object, signed_object.data))
                 }
                 Err(e) => {
                     error!("Signature verification failed: {}", e);

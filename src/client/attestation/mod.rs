@@ -6,7 +6,8 @@ use pal::timer::get_time_ms;
 use smoltcp::socket::{SocketRef, UdpSocket};
 use trussed::{
     api::reply::ReadFile,
-    types::{Location, PathBuf},
+    client::CryptoClient,
+    types::{Location, Mechanism, PathBuf},
 };
 
 use super::{
@@ -211,17 +212,20 @@ impl<'a> FobnailClient<'a> {
                     metadata,
                     aik_pubkey,
                     &nonce[..],
-                )
-                .map(|(meta, _, hash)| (meta, hash))
-                {
-                    Ok((metadata, hash)) => {
+                ) {
+                    Ok((metadata, raw_metadata)) => {
                         info!("Attesting platform:");
                         info!("  Manufacturer : {}", metadata.manufacturer);
                         info!("  Product      : {}", metadata.product_name);
                         info!("  Serial       : {}", metadata.serial_number);
                         info!("  MAC          : {}", metadata.mac);
 
-                        match Self::load_rim(*trussed, &hash) {
+                        let h = trussed::syscall!(trussed.hash(
+                            Mechanism::Sha256,
+                            trussed::Bytes::from_slice(raw_metadata).unwrap()
+                        ));
+
+                        match Self::load_rim(*trussed, &h.hash) {
                             Ok(rim) => {
                                 *state = State::RequestEvidence {
                                     aik_pubkey: Rc::clone(aik_pubkey),
