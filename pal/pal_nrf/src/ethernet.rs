@@ -12,10 +12,21 @@ impl<'a> BorrowDriver<EthernetDriver<'a, UsbDriver>> for Guard {
     where
         F: FnOnce(&EthernetDriver<'a, UsbDriver>) -> R,
     {
-        free(|cs| {
+        let before = crate::timer::get_time_ms();
+        let r = free(|cs| {
             let driver = crate::usb::get_eem_driver().borrow(cs);
             f(driver)
-        })
+        });
+        let after = crate::timer::get_time_ms();
+        let d = after - before;
+        if d > 5 {
+            error!(
+                "Critical section was held for too long: {} ms (from borrow)",
+                d
+            );
+            panic!("USB broke");
+        }
+        r
     }
 
     fn borrow_mut<F, R>(&self, f: F) -> R
@@ -25,7 +36,8 @@ impl<'a> BorrowDriver<EthernetDriver<'a, UsbDriver>> for Guard {
         unsafe fn into_mutable_ref<T>(r: &T) -> &mut T {
             &mut *(r as *const T as *mut T)
         }
-        free(|cs| {
+        let before = crate::timer::get_time_ms();
+        let r = free(|cs| {
             // Mutex from cortex_m crate cannot ensure at compile time there is
             // at most one mutable borrow, so it does not provide borrow_mut()
             // method.
@@ -41,7 +53,17 @@ impl<'a> BorrowDriver<EthernetDriver<'a, UsbDriver>> for Guard {
             // https://github.com/rust-embedded/bare-metal/issues/16
             let driver = unsafe { into_mutable_ref(crate::usb::get_eem_driver().borrow(cs)) };
             f(driver)
-        })
+        });
+        let after = crate::timer::get_time_ms();
+        let d = after - before;
+        if d > 5 {
+            error!(
+                "Critical section was held for too long: {} ms (from borrow_mut)",
+                d
+            );
+            panic!("USB broke");
+        }
+        r
     }
 }
 

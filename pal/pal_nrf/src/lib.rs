@@ -12,12 +12,13 @@ extern crate rtt_target;
 extern crate alloc;
 pub extern crate cortex_m_rt;
 
-use core::mem::MaybeUninit;
+use core::intrinsics::transmute;
+use core::mem::{transmute_copy, MaybeUninit};
 
 use cortex_m::interrupt::free;
 use hal::clocks::{ExternalOscillator, Internal, LfOscStopped};
 use hal::gpio::{self, Level};
-use hal::pac::{interrupt, Interrupt, NVIC, TIMER0};
+use hal::pac::{interrupt, Interrupt, NVIC, TIMER0, USBD};
 use hal::timer::{Instance, Periodic};
 use hal::Clocks;
 use hal::Timer;
@@ -37,19 +38,69 @@ pub fn hfosc() -> &'static Clocks<ExternalOscillator, Internal, LfOscStopped> {
     unsafe { HFOSC.as_ref().unwrap() }
 }
 
-const TIMER0_PERIOD_MS: u32 = 10;
+const TIMER0_PERIOD_MS: u32 = 1;
 
 static mut TIMER0: MaybeUninit<TIMER0> = MaybeUninit::uninit();
+// when timer0 fired for the last time
+static mut TIMER0_LAST: u64 = 0;
+static mut TIMER0_N: u16 = 0;
+static mut PERIPH_USB: MaybeUninit<USBD> = MaybeUninit::uninit();
+
 #[interrupt]
 #[allow(non_snake_case)]
 fn TIMER0() {
+    let mut n = unsafe { &mut TIMER0_N };
+    if *n != u16::MAX {
+        *n += 1;
+        if *n == 100 {
+            info!("INIT USB");
+            let now = timer::get_time_ms() as u64;
+            usb::init(unsafe { transmute_copy(&PERIPH_USB) });
+            info!("INIT DONE (took {} ms)", timer::get_time_ms() as u64 - now);
+            *n = u16::MAX;
+        }
+    }
+
     free(|cs| {
-        usb::usb_interrupt(cs);
+        unsafe {
+            let now = timer::get_time_ms() as u64;
+            let delay = now - TIMER0_LAST;
+            let maximum = TIMER0_PERIOD_MS as u64;
+            if delay > maximum {
+                error!("");
+                error!("");
+                error!("");
+                error!("To big delay between timer0 interrupts");
+                error!(
+                    "delay: {} ms (+{} ms above maximum)",
+                    delay,
+                    delay - maximum
+                );
+                error!("");
+                error!("");
+                error!("");
+                // panic!("USB broke");
+            } else {
+                debug!("timer0 interrupt OK ({} ms)", delay);
+            }
+
+            TIMER0_LAST = now;
+        }
+
+        if *n == u16::MAX {
+            let before = timer::get_time_ms() as u64;
+            usb::usb_interrupt(cs);
+            debug!(
+                "usb_interrupt() took {} ms",
+                timer::get_time_ms() as u64 - before
+            );
+        }
 
         // SAFETY: TIMER0 global must be properly initialized before interrupts
         // are enabled
+        // Clear interrupt flag
         let timer0 = unsafe { TIMER0.assume_init_ref() };
-        timer0.timer_start(Timer::<TIMER0, Periodic>::TICKS_PER_SECOND / 1000 * TIMER0_PERIOD_MS);
+        timer0.as_timer0().events_compare[0].reset();
     })
 }
 
@@ -71,13 +122,13 @@ pub fn init() {
 
     // Initialize timers
     // set TIMER0 to poll USB every 10 ms
-    let timer0 = Timer::periodic(periph.TIMER0).free();
+    let timer0 = periph.TIMER0;
     unsafe {
         TIMER0 = MaybeUninit::new(timer0);
         let timer0 = TIMER0.assume_init_ref();
         // Periodic mode does not automatically clear counter, which causes timer to
         // fire immediately after interrupt handler returns
-        timer0.set_oneshot();
+        timer0.set_periodic();
         timer0.enable_interrupt();
         timer0.timer_start(Timer::<TIMER0, Periodic>::TICKS_PER_SECOND / 1000 * TIMER0_PERIOD_MS);
     }
@@ -96,16 +147,47 @@ pub fn init() {
         Timer::one_shot(periph.TIMER3),
     );
 
-    usb::init(periph.USBD);
+    //usb::init(periph.USBD);
 
     unsafe {
+        PERIPH_USB = MaybeUninit::new(periph.USBD);
         NVIC::unmask(Interrupt::TIMER0);
-        NVIC::unmask(Interrupt::TIMER1);
-        NVIC::unmask(Interrupt::USBD);
+        while (&TIMER0_N as *const u16).read_volatile() != u16::MAX {}
     }
 }
 
 /// Reduces CPU load by suspending execution till next interrupt arrives.
 pub fn cpu_relax() {
     cortex_m::asm::wfi();
+}
+
+pub fn poll_usb() {
+    unsafe {
+        let now = timer::get_time_ms() as u64;
+        let delay = now - TIMER0_LAST;
+        let maximum = TIMER0_PERIOD_MS as u64;
+        if delay > maximum {
+            error!("");
+            error!("");
+            error!("");
+            error!("To big delay between timer0 interrupts");
+            error!(
+                "delay: {} ms (+{} ms above maximum)",
+                delay,
+                delay - maximum
+            );
+            error!("");
+            error!("");
+            error!("");
+            // panic!("USB broke");
+        } else {
+            // debug!("timer0 interrupt OK ({} ms)", delay);
+        }
+
+        TIMER0_LAST = now;
+    }
+
+    free(|cs| {
+        usb::usb_interrupt(cs);
+    });
 }
