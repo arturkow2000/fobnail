@@ -87,6 +87,9 @@ mkdir -p "${dir}/.temp/cargo"
 
 FOBNAIL_SDK_DOCKER_EXTRA_OPTS="-v $dir/.temp/cargo:/home/builder/.cargo"
 FOBNAIL_SDK_DOCKER_EXTRA_OPTS+=" -e FOBNAIL_FLASH=target/flash.bin"
+if [ -n "${FOBNAIL_DEVICE_ID}" ]; then
+FOBNAIL_SDK_DOCKER_EXTRA_OPTS+=" -e FOBNAIL_DEVICE_ID=${FOBNAIL_DEVICE_ID}"
+fi
 export FOBNAIL_SDK_DOCKER_EXTRA_OPTS
 export RUSTFLAGS
 
