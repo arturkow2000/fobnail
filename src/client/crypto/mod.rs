@@ -1,5 +1,7 @@
 use core::marker::PhantomData;
 
+pub mod rng;
+
 pub struct RsaKey<'a> {
     pub inner: rsa::RsaPublicKey,
     phantom: PhantomData<&'a ()>,
@@ -25,4 +27,15 @@ impl RsaKey<'_> {
 
 pub enum Key<'a> {
     Rsa(RsaKey<'a>),
+}
+
+/// Generate RSA private/public keypair.
+pub fn generate_rsa_key<T>(trussed: &mut T, bits: usize) -> (rsa::RsaPrivateKey, rsa::RsaPublicKey)
+where
+    T: trussed::client::CryptoClient,
+{
+    let priv_key = rsa::RsaPrivateKey::new(&mut rng::TrussedRng(trussed), bits).unwrap();
+    let pub_key = rsa::RsaPublicKey::from(&priv_key);
+
+    (priv_key, pub_key)
 }
