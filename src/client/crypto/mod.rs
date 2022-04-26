@@ -34,8 +34,14 @@ pub fn generate_rsa_key<T>(trussed: &mut T, bits: usize) -> (rsa::RsaPrivateKey,
 where
     T: trussed::client::CryptoClient,
 {
+    info!("Generating {}-bit RSA keypair", bits);
+    let before = pal::timer::get_time_ms() as u64;
+
     let priv_key = rsa::RsaPrivateKey::new(&mut rng::TrussedRng(trussed), bits).unwrap();
     let pub_key = rsa::RsaPublicKey::from(&priv_key);
+
+    let now = pal::timer::get_time_ms() as u64;
+    info!("RSA generating took {} ms", now - before);
 
     (priv_key, pub_key)
 }

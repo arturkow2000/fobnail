@@ -10,8 +10,9 @@ use pal::timer::get_time_ms;
 use smoltcp::socket::{SocketRef, UdpSocket};
 use state::State;
 
-use super::{proto, util::handle_server_error_response};
+use super::{crypto, proto, util::handle_server_error_response};
 
+mod csr;
 mod state;
 
 /// Client which speaks to the Platform Owner in order to perform Fobnail Token
@@ -88,7 +89,29 @@ impl<'a> FobnailClient<'a> {
                 if !*request_pending {
                     *request_pending = true;
 
-                    coap_request!(RequestType::Fetch, "/cert_chain")
+                    let mut trussed = self.trussed.borrow_mut();
+
+                    let (priv_key, pub_key) = crypto::generate_rsa_key(*trussed, 2048);
+                    let req = csr::make_csr(priv_key, pub_key, 0).unwrap();
+
+                    let mut pem = [0u8; 8192];
+                    let pem = pem_rfc7468::encode(
+                        "CERTIFICATE REQUEST",
+                        pem_rfc7468::LineEnding::LF,
+                        &req,
+                        &mut pem,
+                    )
+                    .unwrap();
+                    let pem_str = core::str::from_utf8(pem).unwrap();
+
+                    for l in pem_str.lines() {
+                        info!("{}", l);
+                    }
+                    todo!();
+                    #[allow(dead_code, unreachable_code)]
+                    {
+                        coap_request!(RequestType::Fetch, "/cert_chain")
+                    }
                 }
             }
             State::SignalStatus { success } => {
