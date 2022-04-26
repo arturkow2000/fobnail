@@ -24,6 +24,7 @@ rsa = { version = "0.5", default-features = false, features = ["alloc"] }
 x509 = { path = "external/formats/x509" }
 x501 = { path = "external/formats/x501" }
 der = { path = "external/formats/der" }
+pkcs10 = { path = "external/formats/pkcs10" }
 
 # TODO: remove these dependencies after RSA gets moved to Trussed.
 rand_core = { version = "0.6", default-features = false }

@@ -649,6 +649,7 @@ dependencies = [
  "pal_nrf",
  "pal_pc",
  "pem-rfc7468",
+ "pkcs10",
  "rand_core",
  "rsa",
  "serde",
@@ -1102,6 +1103,15 @@ checksum = "116bee8279d783c0cf370efa1a94632f2108e5ef0bb32df31f051647810a4e2c"
 dependencies = [
  "der 0.4.5",
  "zeroize",
+]
+
+[[package]]
+name = "pkcs10"
+version = "0.0.0"
+dependencies = [
+ "der 0.6.0-pre.1",
+ "spki 0.6.0-pre.0",
+ "x501",
 ]
 
 [[package]]
